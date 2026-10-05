@@ -69,6 +69,136 @@ app.get('/photo/:id', async (req, res) => {
   res.send(Buffer.from(rows[0].photo_data, 'base64'));
 });
 
+// ---------- Admin page ----------
+
+app.get('/admin', (req, res) => {
+  res.send(ADMIN_PAGE);
+});
+
+const ADMIN_PAGE = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Terralink Admin</title>
+<style>
+  body{font-family:system-ui,sans-serif;background:#F6F3EC;color:#1C2430;max-width:480px;margin:0 auto;padding:24px;}
+  h1{font-size:1.3rem;color:#14213D;margin-bottom:18px;}
+  label{display:block;margin-top:14px;font-size:.88rem;color:#55606f;}
+  input,select,textarea{width:100%;padding:10px;margin-top:4px;border:1px solid #ccc;border-radius:4px;font-size:1rem;box-sizing:border-box;}
+  button{margin-top:20px;width:100%;padding:13px;background:#14213D;color:#F6F3EC;border:none;border-radius:4px;font-size:1rem;}
+  #msg{margin-top:14px;font-size:.9rem;}
+  #gate{max-width:320px;margin:60px auto;}
+  #listings-list{margin-top:30px;}
+  .li-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #ddd;font-size:.88rem;}
+  .li-row button{width:auto;padding:6px 12px;background:#a33;font-size:.8rem;margin:0;}
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <h1>Terralink Admin</h1>
+  <label>Admin key</label>
+  <input type="password" id="key" placeholder="Enter admin key">
+  <button onclick="unlock()">Enter</button>
+</div>
+
+<div id="panel" style="display:none;">
+  <h1>Add a property</h1>
+  <label>Title</label>
+  <input id="title" placeholder="e.g. 3 Bedroom House">
+  <label>Location</label>
+  <input id="location" placeholder="e.g. Ngong Town">
+  <label>Type</label>
+  <select id="type">
+    <option>For Sale</option>
+    <option>For Rent</option>
+  </select>
+  <label>Price</label>
+  <input id="price" placeholder="e.g. KSh 3,000,000">
+  <label>Description</label>
+  <textarea id="description" rows="3" placeholder="Short description"></textarea>
+  <label>Photo</label>
+  <input type="file" id="photo" accept="image/*">
+  <button onclick="submitListing()">Add Listing</button>
+  <div id="msg"></div>
+
+  <div id="listings-list"></div>
+</div>
+
+<script>
+let adminKey = '';
+
+function unlock(){
+  adminKey = document.getElementById('key').value;
+  document.getElementById('gate').style.display='none';
+  document.getElementById('panel').style.display='block';
+  loadListings();
+}
+
+function fileToBase64(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function submitListing(){
+  const msg = document.getElementById('msg');
+  msg.textContent = 'Uploading...';
+  const photoFile = document.getElementById('photo').files[0];
+  let photo_base64 = null, photo_mime = null;
+  if(photoFile){
+    photo_base64 = await fileToBase64(photoFile);
+    photo_mime = photoFile.type;
+  }
+  const body = {
+    title: document.getElementById('title').value,
+    location: document.getElementById('location').value,
+    type: document.getElementById('type').value,
+    price: document.getElementById('price').value,
+    description: document.getElementById('description').value,
+    photo_base64, photo_mime
+  };
+  const res = await fetch('/api/admin/listings', {
+    method:'POST',
+    headers:{'Content-Type':'application/json','x-admin-key':adminKey},
+    body: JSON.stringify(body)
+  });
+  if(res.ok){
+    msg.textContent = 'Added! Visible on the site now.';
+    document.getElementById('title').value='';
+    document.getElementById('location').value='';
+    document.getElementById('price').value='';
+    document.getElementById('description').value='';
+    document.getElementById('photo').value='';
+    loadListings();
+  } else {
+    msg.textContent = 'Failed — check your admin key.';
+  }
+}
+
+async function loadListings(){
+  const res = await fetch('/api/listings');
+  const rows = await res.json();
+  const el = document.getElementById('listings-list');
+  el.innerHTML = '<h1>Current listings</h1>' + rows.map(l =>
+    '<div class="li-row"><span>' + l.title + ' — ' + l.location + '</span>' +
+    '<button onclick="del(' + l.id + ')">Delete</button></div>'
+  ).join('');
+}
+
+async function del(id){
+  if(!confirm('Remove this listing?')) return;
+  await fetch('/api/admin/listings/' + id, { method:'DELETE', headers:{'x-admin-key':adminKey} });
+  loadListings();
+}
+</script>
+</body>
+</html>`;
+
 // ---------- Site ----------
 
 function escapeHtml(s) {
