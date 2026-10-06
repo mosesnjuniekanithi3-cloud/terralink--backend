@@ -2,7 +2,7 @@ const express = require('express');
 const { Pool } = require('pg');
 
 const app = express();
-app.use(express.json({ limit: '15mb' }));
+app.use(express.json({ limit: '45mb' }));
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -210,7 +210,9 @@ async function submitListing(){
     document.getElementById('photo').value='';
     loadListings();
   } else {
-    msg.textContent = 'Failed — check your admin key.';
+    if(res.status === 401) msg.textContent = 'Failed — admin key is wrong.';
+    else if(res.status === 413) msg.textContent = 'Failed — photos too large, try fewer or smaller photos.';
+    else msg.textContent = 'Failed — server error (status ' + res.status + ').';
   }
 }
 
