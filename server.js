@@ -20,9 +20,16 @@ async function init() {
       price TEXT,
       type TEXT NOT NULL,
       description TEXT,
-      photo_data TEXT,
-      photo_mime TEXT,
       created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS listing_photos (
+      id SERIAL PRIMARY KEY,
+      listing_id INTEGER REFERENCES listings(id) ON DELETE CASCADE,
+      photo_data TEXT NOT NULL,
+      photo_mime TEXT,
+      position INTEGER DEFAULT 0
     )
   `);
 }
@@ -38,23 +45,51 @@ function requireAdmin(req, res, next) {
 // ---------- API ----------
 
 app.get('/api/listings', async (req, res) => {
-  const { rows } = await pool.query(
-    'SELECT id, title, location, price, type, description, (photo_data IS NOT NULL) AS has_photo, created_at FROM listings ORDER BY created_at DESC'
-  );
+  const { rows } = await pool.query(`
+    SELECT l.id, l.title, l.location, l.price, l.type, l.description, l.created_at,
+      COALESCE(json_agg(p.id ORDER BY p.position) FILTER (WHERE p.id IS NOT NULL), '[]') AS photo_ids
+    FROM listings l
+    LEFT JOIN listing_photos p ON p.listing_id = l.id
+    GROUP BY l.id
+    ORDER BY l.created_at DESC
+  `);
   res.json(rows);
 });
 
 app.post('/api/admin/listings', requireAdmin, async (req, res) => {
-  const { title, location, price, type, description, photo_base64, photo_mime } = req.body;
+  const { title, location, price, type, description, photos } = req.body;
   if (!title || !location || !type) {
     return res.status(400).json({ error: 'title, location and type are required' });
   }
-  const { rows } = await pool.query(
-    `INSERT INTO listings (title, location, price, type, description, photo_data, photo_mime)
-     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-    [title, location, price || 'On request', type, description || '', photo_base64 || null, photo_mime || null]
-  );
-  res.json({ ok: true, id: rows[0].id });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `INSERT INTO listings (title, location, price, type, description)
+       VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+      [title, location, price || 'On request', type, description || '']
+    );
+    const listingId = rows[0].id;
+    if (Array.isArray(photos)) {
+      for (let i = 0; i < photos.length; i++) {
+        const p = photos[i];
+        if (p && p.data) {
+          await client.query(
+            `INSERT INTO listing_photos (listing_id, photo_data, photo_mime, position) VALUES ($1,$2,$3,$4)`,
+            [listingId, p.data, p.mime || 'image/jpeg', i]
+          );
+        }
+      }
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true, id: listingId });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    res.status(500).json({ error: 'failed to save listing' });
+  } finally {
+    client.release();
+  }
 });
 
 app.delete('/api/admin/listings/:id', requireAdmin, async (req, res) => {
@@ -62,9 +97,9 @@ app.delete('/api/admin/listings/:id', requireAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/photo/:id', async (req, res) => {
-  const { rows } = await pool.query('SELECT photo_data, photo_mime FROM listings WHERE id=$1', [req.params.id]);
-  if (!rows.length || !rows[0].photo_data) return res.status(404).send('Not found');
+app.get('/photo/:photoId', async (req, res) => {
+  const { rows } = await pool.query('SELECT photo_data, photo_mime FROM listing_photos WHERE id=$1', [req.params.photoId]);
+  if (!rows.length) return res.status(404).send('Not found');
   res.set('Content-Type', rows[0].photo_mime || 'image/jpeg');
   res.send(Buffer.from(rows[0].photo_data, 'base64'));
 });
@@ -118,8 +153,8 @@ const ADMIN_PAGE = `<!DOCTYPE html>
   <input id="price" placeholder="e.g. KSh 3,000,000">
   <label>Description</label>
   <textarea id="description" rows="3" placeholder="Short description"></textarea>
-  <label>Photo</label>
-  <input type="file" id="photo" accept="image/*">
+  <label>Photos (you can select more than one)</label>
+  <input type="file" id="photo" accept="image/*" multiple>
   <button onclick="submitListing()">Add Listing</button>
   <div id="msg"></div>
 
@@ -148,11 +183,10 @@ function fileToBase64(file){
 async function submitListing(){
   const msg = document.getElementById('msg');
   msg.textContent = 'Uploading...';
-  const photoFile = document.getElementById('photo').files[0];
-  let photo_base64 = null, photo_mime = null;
-  if(photoFile){
-    photo_base64 = await fileToBase64(photoFile);
-    photo_mime = photoFile.type;
+  const files = Array.from(document.getElementById('photo').files);
+  const photos = [];
+  for(const f of files){
+    photos.push({ data: await fileToBase64(f), mime: f.type });
   }
   const body = {
     title: document.getElementById('title').value,
@@ -160,7 +194,7 @@ async function submitListing(){
     type: document.getElementById('type').value,
     price: document.getElementById('price').value,
     description: document.getElementById('description').value,
-    photo_base64, photo_mime
+    photos
   };
   const res = await fetch('/api/admin/listings', {
     method:'POST',
@@ -185,7 +219,7 @@ async function loadListings(){
   const rows = await res.json();
   const el = document.getElementById('listings-list');
   el.innerHTML = '<h1>Current listings</h1>' + rows.map(l =>
-    '<div class="li-row"><span>' + l.title + ' — ' + l.location + '</span>' +
+    '<div class="li-row"><span>' + l.title + ' — ' + l.location + ' (' + (l.photo_ids ? l.photo_ids.length : 0) + ' photo' + ((l.photo_ids && l.photo_ids.length===1) ? '' : 's') + ')</span>' +
     '<button onclick="del(' + l.id + ')">Delete</button></div>'
   ).join('');
 }
@@ -206,8 +240,9 @@ function escapeHtml(s) {
 }
 
 function listingCard(l) {
-  const img = l.has_photo
-    ? `<img src="/photo/${l.id}" alt="${escapeHtml(l.title)}" style="width:100%;height:180px;object-fit:cover;margin-bottom:14px;border-radius:2px;">`
+  const firstPhotoId = l.photo_ids && l.photo_ids.length ? l.photo_ids[0] : null;
+  const img = firstPhotoId
+    ? `<img src="/photo/${firstPhotoId}" alt="${escapeHtml(l.title)}" style="width:100%;height:180px;object-fit:cover;margin-bottom:14px;border-radius:2px;">`
     : '';
   return `
     <div class="listing-card">
@@ -220,7 +255,15 @@ function listingCard(l) {
 }
 
 app.get('/', async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM listings ORDER BY created_at DESC LIMIT 12');
+  const { rows } = await pool.query(`
+    SELECT l.*,
+      COALESCE(json_agg(p.id ORDER BY p.position) FILTER (WHERE p.id IS NOT NULL), '[]') AS photo_ids
+    FROM listings l
+    LEFT JOIN listing_photos p ON p.listing_id = l.id
+    GROUP BY l.id
+    ORDER BY l.created_at DESC
+    LIMIT 12
+  `);
   const listingsHtml = rows.length
     ? rows.map(listingCard).join('')
     : `<div style="padding:40px;color:#6b7686;grid-column:1/-1;text-align:center;">New listings coming soon — check back shortly.</div>`;
