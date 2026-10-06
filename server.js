@@ -242,13 +242,20 @@ function escapeHtml(s) {
 }
 
 function listingCard(l) {
-  const firstPhotoId = l.photo_ids && l.photo_ids.length ? l.photo_ids[0] : null;
+  const ids = l.photo_ids || [];
+  const firstPhotoId = ids.length ? ids[0] : null;
   const img = firstPhotoId
-    ? `<img src="/photo/${firstPhotoId}" alt="${escapeHtml(l.title)}" style="width:100%;height:180px;object-fit:cover;margin-bottom:14px;border-radius:2px;">`
+    ? `<img src="/photo/${firstPhotoId}" alt="${escapeHtml(l.title)}" style="width:100%;height:180px;object-fit:cover;margin-bottom:8px;border-radius:2px;">`
     : '';
+  const thumbs = ids.length > 1
+    ? `<div style="display:flex;gap:6px;margin-bottom:14px;">` +
+      ids.slice(1, 5).map(id => `<img src="/photo/${id}" style="width:48px;height:48px;object-fit:cover;border-radius:2px;">`).join('') +
+      `</div>`
+    : (firstPhotoId ? `<div style="margin-bottom:14px;"></div>` : '');
   return `
     <div class="listing-card">
       ${img}
+      ${thumbs}
       <div class="listing-tag">${escapeHtml(l.type)}</div>
       <div class="listing-name">${escapeHtml(l.title)}</div>
       <div class="listing-loc">${escapeHtml(l.location)}</div>
