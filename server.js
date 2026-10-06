@@ -220,10 +220,16 @@ async function loadListings(){
   const res = await fetch('/api/listings');
   const rows = await res.json();
   const el = document.getElementById('listings-list');
-  el.innerHTML = '<h1>Current listings</h1>' + rows.map(l =>
-    '<div class="li-row"><span>' + l.title + ' — ' + l.location + ' (' + (l.photo_ids ? l.photo_ids.length : 0) + ' photo' + ((l.photo_ids && l.photo_ids.length===1) ? '' : 's') + ')</span>' +
-    '<button onclick="del(' + l.id + ')">Delete</button></div>'
-  ).join('');
+  el.innerHTML = '<h1>Current listings</h1>' + rows.map(l => {
+    const ids = l.photo_ids || [];
+    const thumbs = ids.map(id => '<img src="/photo/' + id + '" style="width:36px;height:36px;object-fit:cover;border-radius:3px;margin-right:4px;">').join('');
+    return '<div class="li-row" style="flex-direction:column;align-items:stretch;gap:8px;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+      '<span>' + l.title + ' — ' + l.location + '</span>' +
+      '<button onclick="del(' + l.id + ')">Delete</button></div>' +
+      (thumbs ? '<div style="display:flex;flex-wrap:wrap;">' + thumbs + '</div>' : '<div style="color:#999;font-size:.8rem;">No photos</div>') +
+      '</div>';
+  }).join('');
 }
 
 async function del(id){
