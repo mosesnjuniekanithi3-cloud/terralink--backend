@@ -245,11 +245,11 @@ function listingCard(l) {
   const ids = l.photo_ids || [];
   const firstPhotoId = ids.length ? ids[0] : null;
   const img = firstPhotoId
-    ? `<img src="/photo/${firstPhotoId}" alt="${escapeHtml(l.title)}" style="width:100%;height:180px;object-fit:cover;margin-bottom:8px;border-radius:2px;">`
+    ? `<a href="/photo/${firstPhotoId}" target="_blank" rel="noopener"><img src="/photo/${firstPhotoId}" alt="${escapeHtml(l.title)}" style="width:100%;height:180px;object-fit:cover;margin-bottom:8px;border-radius:2px;cursor:pointer;"></a>`
     : '';
   const thumbs = ids.length > 1
     ? `<div style="display:flex;gap:6px;margin-bottom:14px;">` +
-      ids.slice(1, 5).map(id => `<img src="/photo/${id}" style="width:48px;height:48px;object-fit:cover;border-radius:2px;">`).join('') +
+      ids.slice(1, 5).map(id => `<a href="/photo/${id}" target="_blank" rel="noopener"><img src="/photo/${id}" style="width:48px;height:48px;object-fit:cover;border-radius:2px;cursor:pointer;"></a>`).join('') +
       `</div>`
     : (firstPhotoId ? `<div style="margin-bottom:14px;"></div>` : '');
   return `
